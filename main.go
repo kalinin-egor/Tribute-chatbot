@@ -39,7 +39,7 @@ func main() {
 	// /start
 	b.Handle("/start", func(c tele.Context) error {
 		markup := b.NewMarkup()
-		btn := markup.URL("Get started", "https://t.me/tribute_egorbot/app")
+		btn := markup.WebApp("Get started", &tele.WebApp{URL: "https://t.me/tribute_egorbot/app"})
 		markup.Inline(markup.Row(btn))
 		return c.Send("Welcome! Tribute helps to monetize audiences in Telegram.", markup)
 	})
