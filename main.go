@@ -21,10 +21,12 @@ import (
 
 // VerificationState хранит состояние верификации пользователя
 type VerificationState struct {
-	UserID     int64
-	SelfieID   string
-	PassportID string
-	Step       string // "waiting_selfie", "waiting_passport", "completed"
+	UserID            int64
+	SelfieID          string
+	PassportID        string
+	Step              string // "waiting_selfie", "waiting_passport", "completed"
+	SelfieMessageID   int
+	PassportMessageID int
 }
 
 // VerificationData хранит данные для отправки в админский чат
@@ -284,29 +286,31 @@ func sendVerificationToAdmin(bot *tele.Bot, c tele.Context, state *VerificationS
 		File:    tele.File{FileID: state.SelfieID},
 		Caption: fmt.Sprintf("🔐 Заявка на верификацию\n👤 Пользователь: %d\n📸 Селфи", state.UserID),
 	}
-	_, err = bot.Send(adminChat, selfieMsg, markup)
+	selfieSentMsg, err := bot.Send(adminChat, selfieMsg, markup)
 	if err != nil {
 		logg.Error("Failed to send selfie with buttons:", err)
 		return c.Send("❌ Ошибка при отправке заявки. Попробуйте позже.")
 	}
 
-	logg.Info("Successfully sent selfie with buttons")
+	logg.Info(fmt.Sprintf("Successfully sent selfie with buttons. Message ID: %d", selfieSentMsg.ID))
 
 	// Отправляем паспорт
 	passportMsg := &tele.Photo{
 		File:    tele.File{FileID: state.PassportID},
 		Caption: "📄 Фотография паспорта",
 	}
-	_, err = bot.Send(adminChat, passportMsg)
+	passportSentMsg, err := bot.Send(adminChat, passportMsg)
 	if err != nil {
 		logg.Error("Failed to send passport:", err)
 		return c.Send("❌ Ошибка при отправке заявки. Попробуйте позже.")
 	}
 
-	logg.Info("Successfully sent passport")
+	logg.Info(fmt.Sprintf("Successfully sent passport. Message ID: %d", passportSentMsg.ID))
 
-	// Очищаем состояние
-	clearVerificationState(state.UserID)
+	// Сохраняем ID сообщений для последующего удаления
+	state.SelfieMessageID = selfieSentMsg.ID
+	state.PassportMessageID = passportSentMsg.ID
+	setVerificationState(state.UserID, state)
 
 	return c.Send("✅ Ваша заявка на верификацию отправлена администратору!\n\n⏳ Ожидайте решения. Мы уведомим вас о результате.")
 }
@@ -366,27 +370,61 @@ func handleVerificationCallback(bot *tele.Bot, c tele.Context, data string, clie
 	// Удаляем сообщения с фотографиями из админского чата
 	callback := c.Callback()
 	if callback != nil && callback.Message != nil {
-		// Удаляем текущее сообщение (с кнопками)
-		err = bot.Delete(callback.Message)
-		if err != nil {
-			logg.Error("Failed to delete message with buttons:", err)
-		} else {
-			logg.Info("Successfully deleted message with buttons")
-		}
+		logg.Info(fmt.Sprintf("Attempting to delete messages. Current message ID: %d", callback.Message.ID))
 
-		// Удаляем предыдущее сообщение (с паспортом)
-		if callback.Message.ID > 1 {
-			prevMsg := &tele.Message{
-				ID:   callback.Message.ID - 1,
+		// Получаем состояние верификации для доступа к ID сообщений
+		state := getVerificationState(userID)
+		if state != nil && state.SelfieMessageID > 0 && state.PassportMessageID > 0 {
+			// Удаляем сообщение с селфи (с кнопками)
+			selfieMsg := &tele.Message{
+				ID:   state.SelfieMessageID,
 				Chat: callback.Message.Chat,
 			}
-			err = bot.Delete(prevMsg)
+			err = bot.Delete(selfieMsg)
+			if err != nil {
+				logg.Error("Failed to delete selfie message:", err)
+			} else {
+				logg.Info(fmt.Sprintf("Successfully deleted selfie message ID: %d", state.SelfieMessageID))
+			}
+
+			// Удаляем сообщение с паспортом
+			passportMsg := &tele.Message{
+				ID:   state.PassportMessageID,
+				Chat: callback.Message.Chat,
+			}
+			err = bot.Delete(passportMsg)
 			if err != nil {
 				logg.Error("Failed to delete passport message:", err)
 			} else {
-				logg.Info("Successfully deleted passport message")
+				logg.Info(fmt.Sprintf("Successfully deleted passport message ID: %d", state.PassportMessageID))
+			}
+
+			// Очищаем состояние
+			clearVerificationState(userID)
+		} else {
+			// Fallback: удаляем текущее сообщение и предыдущее
+			err = bot.Delete(callback.Message)
+			if err != nil {
+				logg.Error("Failed to delete message with buttons:", err)
+			} else {
+				logg.Info("Successfully deleted message with buttons")
+			}
+
+			if callback.Message.ID > 1 {
+				prevMsg := &tele.Message{
+					ID:   callback.Message.ID - 1,
+					Chat: callback.Message.Chat,
+				}
+				err = bot.Delete(prevMsg)
+				if err != nil {
+					logg.Error("Failed to delete passport message:", err)
+				} else {
+					logg.Info("Successfully deleted passport message")
+				}
 			}
 		}
+	} else {
+		logg.Error("Callback or callback.Message is nil, cannot delete messages")
 	}
 
 	// Отправляем уведомление пользователю
