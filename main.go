@@ -13,7 +13,7 @@ import (
 	"fmt"
 
 	"github.com/joho/godotenv"
-	tele "gopkg.in/telebot.v3"
+	tele "gopkg.in/telebot.v4"
 )
 
 func main() {
@@ -65,8 +65,8 @@ func main() {
 		return c.Send("🔊 Эхо: " + args)
 	})
 
-	// WebAppData
-	b.Handle(tele.OnWebAppData, func(c tele.Context) error {
+	// WebAppData - отдельное событие
+	b.Handle(tele.OnWebApp, func(c tele.Context) error {
 		data := c.Message().WebAppData
 		if data != nil && data.Data == "verify-account" {
 			return c.Send("Account verification data received by bot.")
