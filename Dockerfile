@@ -37,8 +37,8 @@ WORKDIR /app
 # Копируем бинарный файл из builder
 COPY --from=builder /app/tribute-chatbot .
 
-# Копируем конфигурационный файл (опционально)
-COPY --from=builder /app/.env ./.env.example
+# Копируем конфигурационный файл
+COPY --from=builder /app/.env ./.env
 
 # Меняем владельца файлов
 RUN chown -R appuser:appgroup /app

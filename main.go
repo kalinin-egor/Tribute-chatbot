@@ -173,12 +173,20 @@ func main() {
 	// Обработка callback кнопок верификации
 	b.Handle(tele.OnCallback, func(c tele.Context) error {
 		data := c.Callback().Data
+		logg.Info("Received callback data:", data)
 
 		if strings.HasPrefix(data, "verify_user_") {
+			logg.Info("Processing verification callback")
 			return handleVerificationCallback(b, c, data, client, cfg)
 		}
 
 		return nil
+	})
+
+	// Специальный обработчик для кнопок верификации
+	b.Handle(&tele.Btn{Data: "verify_user_*"}, func(c tele.Context) error {
+		data := c.Callback().Data
+		return handleVerificationCallback(b, c, data, client, cfg)
 	})
 
 	// Обычные сообщения (AI-ответы)
@@ -253,22 +261,20 @@ func sendVerificationToAdmin(bot *tele.Bot, c tele.Context, state *VerificationS
 	rejectBtn := markup.Data("❌ Отозвать", fmt.Sprintf("verify_user_%d_false", state.UserID))
 	markup.Inline(markup.Row(approveBtn, rejectBtn))
 
-	// Отправляем селфи
-	selfieMsg := &tele.Photo{
-		File:    tele.File{FileID: state.SelfieID},
-		Caption: fmt.Sprintf("🔐 Заявка на верификацию\n👤 Пользователь: %d\n📸 Селфи", state.UserID),
-	}
-	_, err := bot.Send(adminChat, selfieMsg, markup)
-	if err != nil {
-		return c.Send("❌ Ошибка при отправке заявки. Попробуйте позже.")
+	// Создаем медиа группу с двумя фотографиями
+	media := &tele.Album{
+		&tele.Photo{
+			File:    tele.File{FileID: state.SelfieID},
+			Caption: fmt.Sprintf("🔐 Заявка на верификацию\n👤 Пользователь: %d\n📸 Селфи", state.UserID),
+		},
+		&tele.Photo{
+			File:    tele.File{FileID: state.PassportID},
+			Caption: "📄 Фотография паспорта",
+		},
 	}
 
-	// Отправляем паспорт
-	passportMsg := &tele.Photo{
-		File:    tele.File{FileID: state.PassportID},
-		Caption: "📄 Фотография паспорта",
-	}
-	_, err = bot.Send(adminChat, passportMsg)
+	// Отправляем медиа группу с кнопками
+	_, err := bot.Send(adminChat, media, markup)
 	if err != nil {
 		return c.Send("❌ Ошибка при отправке заявки. Попробуйте позже.")
 	}
@@ -286,6 +292,7 @@ func handleVerificationCallback(bot *tele.Bot, c tele.Context, data string, clie
 	// Парсим данные: verify_user_<user_id>_<true/false>
 	parts := strings.Split(data, "_")
 	if len(parts) != 4 {
+		logg.Error("Invalid callback data format:", data)
 		return c.Respond(&tele.CallbackResponse{Text: "❌ Ошибка обработки запроса"})
 	}
 
@@ -294,10 +301,13 @@ func handleVerificationCallback(bot *tele.Bot, c tele.Context, data string, clie
 
 	userID, err := strconv.ParseInt(userIDStr, 10, 64)
 	if err != nil {
+		logg.Error("Failed to parse user ID:", userIDStr, err)
 		return c.Respond(&tele.CallbackResponse{Text: "❌ Ошибка обработки запроса"})
 	}
 
 	isVerified := verificationStatus == "true"
+
+	logg.Info(fmt.Sprintf("Processing verification callback: user_id=%d, verified=%t", userID, isVerified))
 
 	// Отправляем запрос к API
 	payload := map[string]interface{}{
@@ -310,6 +320,8 @@ func handleVerificationCallback(bot *tele.Bot, c tele.Context, data string, clie
 	req, _ := http.NewRequest("POST", apiURL, strings.NewReader(string(body)))
 	req.Header.Set("Content-Type", "application/json")
 
+	logg.Info("Sending API request to:", apiURL)
+
 	resp, err := client.Do(req)
 	if err != nil {
 		logg.Error("API request failed:", err)
@@ -317,10 +329,24 @@ func handleVerificationCallback(bot *tele.Bot, c tele.Context, data string, clie
 	}
 	defer resp.Body.Close()
 
-	// Удаляем фотографии из чата
-	message := c.Message()
-	if message != nil {
-		bot.Delete(message)
+	logg.Info("API response status:", resp.StatusCode)
+
+	// Проверяем статус ответа
+	if resp.StatusCode != 200 {
+		logg.Error("API returned non-200 status:", resp.StatusCode)
+		return c.Respond(&tele.CallbackResponse{Text: "❌ Ошибка сервера при обновлении статуса"})
+	}
+
+	// Удаляем сообщения с фотографиями из админского чата
+	callback := c.Callback()
+	if callback != nil && callback.Message != nil {
+		// Удаляем сообщение с фотографиями и кнопками
+		err = bot.Delete(callback.Message)
+		if err != nil {
+			logg.Error("Failed to delete verification message:", err)
+		} else {
+			logg.Info("Successfully deleted verification message")
+		}
 	}
 
 	// Отправляем уведомление пользователю
@@ -330,7 +356,12 @@ func handleVerificationCallback(bot *tele.Bot, c tele.Context, data string, clie
 		statusText = "❌ Верификация отклонена"
 	}
 
-	bot.Send(userChat, statusText)
+	_, err = bot.Send(userChat, statusText)
+	if err != nil {
+		logg.Error("Failed to send notification to user:", err)
+	}
+
+	logg.Info(fmt.Sprintf("Verification processed successfully: user_id=%d, verified=%t", userID, isVerified))
 
 	// Отвечаем на callback
 	return c.Respond(&tele.CallbackResponse{Text: "✅ Статус верификации обновлен"})
