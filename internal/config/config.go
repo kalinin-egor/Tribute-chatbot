@@ -11,6 +11,7 @@ type Config struct {
 	TelegramBotToken string
 	LogLevel         string
 	Port             int
+	APIBaseURL       string
 }
 
 // Load загружает конфигурацию из переменных окружения
@@ -19,10 +20,15 @@ func Load() (*Config, error) {
 		TelegramBotToken: getEnv("TELEGRAM_BOT_TOKEN", ""),
 		LogLevel:         getEnv("LOG_LEVEL", "info"),
 		Port:             getEnvAsInt("PORT", 8080),
+		APIBaseURL:       getEnv("API_BASE_URL", ""),
 	}
 
 	if config.TelegramBotToken == "" {
 		return nil, fmt.Errorf("TELEGRAM_BOT_TOKEN is required")
+	}
+
+	if config.APIBaseURL == "" {
+		return nil, fmt.Errorf("API_BASE_URL is required")
 	}
 
 	return config, nil

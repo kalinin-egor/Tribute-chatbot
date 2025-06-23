@@ -26,7 +26,7 @@ func New(cfg *config.Config, log logger.Logger) (*Bot, error) {
 	}
 
 	// Создаем обработчики
-	handlers := handlers.New(log)
+	handlers := handlers.New(cfg, log)
 
 	bot := &Bot{
 		api:      api,
@@ -52,16 +52,19 @@ func (b *Bot) Start() error {
 	b.logger.Info("Bot started, waiting for messages...")
 
 	for update := range updates {
-		if update.Message == nil {
-			continue
-		}
+		switch {
+		// Обработка нового сообщения
+		case update.Message != nil:
+			b.logger.Debug("Received message:", update.Message.Text, "from:", update.Message.From.UserName)
+			if err := b.handleMessage(update.Message); err != nil {
+				b.logger.Error("Error handling message:", err)
+			}
 
-		// Логируем входящие сообщения
-		b.logger.Debug("Received message:", update.Message.Text, "from:", update.Message.From.UserName)
-
-		// Обрабатываем сообщение
-		if err := b.handleMessage(update.Message); err != nil {
-			b.logger.Error("Error handling message:", err)
+		// Обработка изменения статуса бота в чате
+		case update.MyChatMember != nil:
+			if err := b.handleMyChatMember(update.MyChatMember); err != nil {
+				b.logger.Error("Error handling my_chat_member update:", err)
+			}
 		}
 	}
 
@@ -84,6 +87,17 @@ func (b *Bot) handleMessage(message *tgbotapi.Message) error {
 
 	// Обрабатываем обычные сообщения
 	return b.handlers.HandleMessage(ctx)
+}
+
+// handleMyChatMember обрабатывает изменение статуса бота в чате
+func (b *Bot) handleMyChatMember(update *tgbotapi.ChatMemberUpdated) error {
+	ctx := &handlers.ChatMemberContext{
+		Bot:    b.api,
+		Update: update,
+		Logger: b.logger,
+	}
+
+	return b.handlers.HandleMyChatMember(ctx)
 }
 
 // Stop останавливает бота

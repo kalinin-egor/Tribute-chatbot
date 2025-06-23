@@ -1,8 +1,8 @@
 # Многоэтапная сборка для оптимизации размера образа
-FROM golang:1.21-alpine AS builder
+FROM golang:1.21-bullseye AS builder
 
 # Устанавливаем необходимые пакеты для сборки
-RUN apk add --no-cache git ca-certificates tzdata
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates tzdata && rm -rf /var/lib/apt/lists/*
 
 # Устанавливаем рабочую директорию
 WORKDIR /app
@@ -23,13 +23,13 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -o tribute-chatbot .
 
 # Финальный образ
-FROM alpine:3.18
+FROM debian:bullseye-slim
 
-# Устанавливаем необходимые пакеты
-RUN apk --no-cache add ca-certificates tzdata && \
-    # Создаем пользователя для безопасности
-    addgroup -g 1001 -S appgroup && \
-    adduser -u 1001 -S appuser -G appgroup
+# Устанавливаем необходимые пакеты и создаем пользователя
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tzdata && \
+    rm -rf /var/lib/apt/lists/* && \
+    addgroup --system --gid 1001 appgroup && \
+    adduser --system --no-create-home --uid 1001 --ingroup appgroup appuser
 
 # Устанавливаем рабочую директорию
 WORKDIR /app

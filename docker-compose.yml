@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   tribute-chatbot:
     build:
@@ -11,20 +9,13 @@ services:
     container_name: tribute-chatbot
     restart: unless-stopped
     
-    # Переменные окружения
-    environment:
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      - LOG_LEVEL=${LOG_LEVEL:-info}
-      - PORT=${PORT:-8080}
-    
-    # Монтирование конфигурационного файла (опционально)
+    # Загружаем все переменные из .env файла в контейнер
+    env_file:
+      - .env
+
+    # Монтирование логов
     volumes:
-      - ./config.env:/app/config.env:ro
       - ./logs:/app/logs
-    
-    # Порт (если понадобится в будущем)
-    ports:
-      - "8080:8080"
     
     # Проверка здоровья
     healthcheck:

@@ -1,9 +1,14 @@
 package handlers
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
+	"time"
 
+	"tribute-chatbot/internal/config"
 	"tribute-chatbot/internal/logger"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -16,15 +21,26 @@ type MessageContext struct {
 	Logger  logger.Logger
 }
 
+// ChatMemberContext содержит контекст для обработки изменения статуса участника
+type ChatMemberContext struct {
+	Bot    *tgbotapi.BotAPI
+	Update *tgbotapi.ChatMemberUpdated
+	Logger logger.Logger
+}
+
 // Handlers содержит все обработчики сообщений
 type Handlers struct {
 	logger logger.Logger
+	config *config.Config
+	client *http.Client
 }
 
 // New создает новый экземпляр обработчиков
-func New(log logger.Logger) *Handlers {
+func New(cfg *config.Config, log logger.Logger) *Handlers {
 	return &Handlers{
 		logger: log,
+		config: cfg,
+		client: &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
@@ -57,19 +73,111 @@ func (h *Handlers) HandleMessage(ctx *MessageContext) error {
 	return h.sendResponse(ctx, response)
 }
 
+// HandleMyChatMember обрабатывает изменение статуса бота в чате
+func (h *Handlers) HandleMyChatMember(ctx *ChatMemberContext) error {
+	chat := ctx.Update.Chat
+	oldStatus := ctx.Update.OldChatMember.Status
+	newStatus := ctx.Update.NewChatMember.Status
+
+	log := h.logger.WithField("chat_id", chat.ID).WithField("chat_title", chat.Title)
+
+	log.Info("Bot status changed from '", oldStatus, "' to '", newStatus, "' in chat")
+
+	// Проверяем, стал ли бот администратором
+	wasAddedAsAdmin := (oldStatus == "left" || oldStatus == "kicked") && newStatus == "administrator"
+	wasPromoted := oldStatus == "member" && newStatus == "administrator"
+
+	if wasAddedAsAdmin || wasPromoted {
+		log.Info("Bot is now an administrator. Notifying API...")
+		if err := h.notifyAPI(ctx); err != nil {
+			log.Error("Failed to notify API:", err)
+			// Не возвращаем ошибку дальше, чтобы не прерывать работу бота из-за API
+		}
+	} else if (oldStatus == "left" || oldStatus == "kicked") && newStatus == "member" {
+		log.Info("Bot was added as a member.")
+	} else if newStatus == "left" || newStatus == "kicked" {
+		log.Warn("Bot was removed from the chat.")
+	} else if oldStatus == "administrator" && newStatus == "member" {
+		log.Warn("Bot was demoted from administrator.")
+	}
+
+	return nil
+}
+
+// notifyAPI отправляет уведомление на внешний API
+func (h *Handlers) notifyAPI(ctx *ChatMemberContext) error {
+	log := h.logger.WithField("chat_id", ctx.Update.Chat.ID)
+
+	channelUsername := ""
+	if ctx.Update.Chat.UserName != "" {
+		channelUsername = "@" + ctx.Update.Chat.UserName
+	}
+
+	// Формируем payload
+	payload := struct {
+		UserID          int64  `json:"user_id"`
+		ChannelTitle    string `json:"channel_title"`
+		ChannelUsername string `json:"channel_username"`
+	}{
+		UserID:          ctx.Update.From.ID,
+		ChannelTitle:    ctx.Update.Chat.Title,
+		ChannelUsername: channelUsername,
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal payload: %w", err)
+	}
+
+	// Формируем URL
+	url := fmt.Sprintf("%s/v1/add-bot", h.config.APIBaseURL)
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return fmt.Errorf("failed to create api request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	log.Info("Sending notification to API: ", url)
+
+	resp, err := h.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send api request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("api returned status %s", resp.Status)
+	}
+
+	log.Info("Successfully notified API. Status: ", resp.Status)
+
+	return nil
+}
+
 // handleStart обрабатывает команду /start
 func (h *Handlers) handleStart(ctx *MessageContext) error {
-	message := fmt.Sprintf(
-		"Привет, %s! 👋\n\nЯ Tribute Chatbot - ваш помощник.\n\n"+
-			"Доступные команды:\n"+
-			"/start - показать это сообщение\n"+
-			"/help - показать справку\n"+
-			"/echo <текст> - повторить текст\n\n"+
-			"Просто напишите мне сообщение, и я отвечу!",
-		ctx.Message.From.FirstName,
-	)
+	message := "Welcome! Tribute helps to monetize audiences in Telegram."
 
-	return h.sendResponse(ctx, message)
+	// Создаем сообщение с текстом
+	msg := tgbotapi.NewMessage(ctx.Message.Chat.ID, message)
+	msg.ParseMode = "HTML"
+
+	// Создаем inline клавиатуру с URL кнопкой
+	url := "https://t.me/tribute_egorbot/app"
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonURL("Get started", url),
+		),
+	)
+	msg.ReplyMarkup = keyboard
+
+	_, err := ctx.Bot.Send(msg)
+	if err != nil {
+		h.logger.Error("Failed to send start message with inline button:", err)
+		return fmt.Errorf("failed to send start message with inline button: %w", err)
+	}
+
+	return nil
 }
 
 // handleHelp обрабатывает команду /help

@@ -1,8 +1,6 @@
 package main
 
 import (
-	"log"
-
 	"tribute-chatbot/internal/bot"
 	"tribute-chatbot/internal/config"
 	"tribute-chatbot/internal/logger"
@@ -11,10 +9,10 @@ import (
 )
 
 func main() {
-	// Загружаем переменные окружения
-	if err := godotenv.Load("config.env"); err != nil {
-		log.Printf("Warning: config.env file not found, using system environment variables")
-	}
+	// Загружаем переменные окружения из .env файла.
+	// Ошибки игнорируются, если файл не найден,
+	// так как переменные могут быть установлены системно.
+	godotenv.Load() // по умолчанию загружает .env
 
 	// Инициализируем логгер
 	logger := logger.New()
