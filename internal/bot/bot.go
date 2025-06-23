@@ -78,6 +78,9 @@ func (b *Bot) SetupHandlers() {
 
 	// Каналы
 	b.bot.Handle(tele.OnMyChatMember, b.channelHandler.HandleMyChatMember)
+
+	// Inline-режим для доната
+	b.bot.Handle(tele.OnQuery, b.commonHandler.HandleInlineDonate)
 }
 
 // Start запускает бота

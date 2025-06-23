@@ -85,3 +85,16 @@ func (h *Handler) HandleDonate(c tele.Context) error {
 	}
 	return c.Send(photo, &tele.SendOptions{ParseMode: tele.ModeHTML})
 }
+
+// HandleInlineDonate обрабатывает inline-режим для доната через ArticleResult
+func (h *Handler) HandleInlineDonate(c tele.Context) error {
+	result := &tele.ArticleResult{
+		Title:       "Support the Creativity 🌟",
+		Description: "Subscribe to keep our creativity alive! With your help, we can continue creating amazing content just for you. Thank you for being awesome!",
+		Text:        "<b>Support the Creativity 🌟</b>\nSubscribe to keep our creativity alive! With your help, we can continue creating amazing content just for you. Thank you for being awesome!",
+	}
+	return c.Answer(&tele.QueryResponse{
+		Results:   tele.Results{result},
+		CacheTime: 60,
+	})
+}
