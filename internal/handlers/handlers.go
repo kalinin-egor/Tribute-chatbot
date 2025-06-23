@@ -65,8 +65,14 @@ func (h *Handlers) HandleCommand(ctx *MessageContext) error {
 
 // HandleMessage обрабатывает обычные сообщения
 func (h *Handlers) HandleMessage(ctx *MessageContext) error {
-	text := ctx.Message.Text
+	msg := ctx.Message
+	text := msg.Text
 	h.logger.Debug("Handling message:", text)
+
+	// Обработка WebApp данных (приходят как обычный текст)
+	if text == "verify-account" {
+		return h.sendResponse(ctx, "Account verification data received by bot.")
+	}
 
 	// Простая логика обработки сообщений
 	response := h.processMessage(text)
