@@ -178,7 +178,7 @@ func main() {
 			return nil
 		}
 
-		data := callback.Data
+		data := strings.TrimSpace(callback.Data)
 		logg.Info(fmt.Sprintf("Received callback data: '%s' from user: %d", data, callback.Sender.ID))
 
 		if strings.HasPrefix(data, "verify_user_") {
