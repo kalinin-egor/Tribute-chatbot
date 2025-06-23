@@ -145,6 +145,19 @@ func (h *Handlers) notifyAPI(ctx *ChatMemberContext) error {
 	}
 	defer resp.Body.Close()
 
+	// Обрабатываем ответ от API
+	if resp.StatusCode == 400 {
+		log.Warn("API returned 400 Bad Request, sending message to user.")
+		// Отправляем сообщение пользователю, который добавил бота
+		// Уведомление отправляется в личный чат с пользователем.
+		msg := tgbotapi.NewMessage(ctx.Update.From.ID, "Channel is already added")
+		if _, err := ctx.Bot.Send(msg); err != nil {
+			log.Error("Failed to send 'already added' message to user:", err)
+		}
+		// Не считаем это ошибкой для основного потока
+		return nil
+	}
+
 	if resp.StatusCode >= 300 {
 		return fmt.Errorf("api returned status %s", resp.Status)
 	}
