@@ -16,6 +16,33 @@ import (
 	tele "gopkg.in/telebot.v4"
 )
 
+// getBotInfo получает информацию о боте для создания правильного WebApp URL
+func getBotInfo(token string) (int64, error) {
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/getMe", token)
+	resp, err := http.Get(url)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Ok     bool `json:"ok"`
+		Result struct {
+			ID int64 `json:"id"`
+		} `json:"result"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return 0, err
+	}
+
+	if !result.Ok {
+		return 0, fmt.Errorf("failed to get bot info")
+	}
+
+	return result.Result.ID, nil
+}
+
 func main() {
 	godotenv.Load()
 
@@ -23,6 +50,14 @@ func main() {
 	cfg, err := config.Load()
 	if err != nil {
 		logg.Fatal("Failed to load configuration", err)
+	}
+
+	// Получаем ID бота для создания правильного WebApp URL
+	botID, err := getBotInfo(cfg.TelegramBotToken)
+	if err != nil {
+		logg.Error("Failed to get bot info:", err)
+		// Используем fallback URL если не удалось получить ID
+		botID = 0
 	}
 
 	pref := tele.Settings{
@@ -39,7 +74,17 @@ func main() {
 	// /start
 	b.Handle("/start", func(c tele.Context) error {
 		markup := b.NewMarkup()
-		btn := markup.WebApp("Get started", &tele.WebApp{URL: "https://t.me/tribute_egorbot/app"})
+
+		// Создаем правильный WebApp URL
+		var webAppURL string
+		if botID != 0 {
+			webAppURL = fmt.Sprintf("https://web.telegram.org/a/#%d", botID)
+		} else {
+			// Fallback на обычную ссылку если не удалось получить ID
+			webAppURL = "https://t.me/tribute_egorbot/app"
+		}
+
+		btn := markup.WebApp("Get started", &tele.WebApp{URL: webAppURL})
 		markup.Inline(markup.Row(btn))
 		return c.Send("Welcome! Tribute helps to monetize audiences in Telegram.", markup)
 	})
