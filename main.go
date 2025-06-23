@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"encoding/json"
@@ -12,9 +13,53 @@ import (
 
 	"fmt"
 
+	"strconv"
+
 	"github.com/joho/godotenv"
 	tele "gopkg.in/telebot.v4"
 )
+
+// VerificationState хранит состояние верификации пользователя
+type VerificationState struct {
+	UserID     int64
+	SelfieID   string
+	PassportID string
+	Step       string // "waiting_selfie", "waiting_passport", "completed"
+}
+
+// VerificationData хранит данные для отправки в админский чат
+type VerificationData struct {
+	UserID     int64
+	SelfieID   string
+	PassportID string
+	MessageID  int
+}
+
+var (
+	verificationStates = make(map[int64]*VerificationState)
+	verificationMutex  sync.RWMutex
+)
+
+// getVerificationState получает состояние верификации пользователя
+func getVerificationState(userID int64) *VerificationState {
+	verificationMutex.RLock()
+	defer verificationMutex.RUnlock()
+	return verificationStates[userID]
+}
+
+// setVerificationState устанавливает состояние верификации пользователя
+func setVerificationState(userID int64, state *VerificationState) {
+	verificationMutex.Lock()
+	defer verificationMutex.Unlock()
+	verificationStates[userID] = state
+}
+
+// clearVerificationState очищает состояние верификации пользователя
+func clearVerificationState(userID int64) {
+	verificationMutex.Lock()
+	defer verificationMutex.Unlock()
+	delete(verificationStates, userID)
+}
 
 func main() {
 	godotenv.Load()
@@ -51,6 +96,7 @@ func main() {
 /start - Начать работу с ботом
 /help - Показать эту справку
 /echo <текст> - Повторить ваш текст
+/verificate - Пройти верификацию (селфи + паспорт)
 
 💡 Просто отправьте мне любое сообщение, и я отвечу!`
 		return c.Send(msg)
@@ -65,12 +111,73 @@ func main() {
 		return c.Send("🔊 Эхо: " + args)
 	})
 
+	// /verificate
+	b.Handle("/verificate", func(c tele.Context) error {
+		userID := c.Sender().ID
+
+		// Инициализируем состояние верификации
+		state := &VerificationState{
+			UserID: userID,
+			Step:   "waiting_selfie",
+		}
+		setVerificationState(userID, state)
+
+		return c.Send("🔐 Начинаем процесс верификации!\n\n📸 Пожалуйста, отправьте ваше селфи (фотографию лица).")
+	})
+
 	// WebAppData - отдельное событие
 	b.Handle(tele.OnWebApp, func(c tele.Context) error {
 		data := c.Message().WebAppData
 		if data != nil && data.Data == "verify-account" {
 			return c.Send("Account verification data received by bot.")
 		}
+		return nil
+	})
+
+	// Обработка фотографий для верификации
+	b.Handle(tele.OnPhoto, func(c tele.Context) error {
+		userID := c.Sender().ID
+		state := getVerificationState(userID)
+
+		if state == nil {
+			return c.Send("❌ Сначала используйте команду /verificate для начала процесса верификации.")
+		}
+
+		photo := c.Message().Photo
+		if photo == nil {
+			return c.Send("❌ Не удалось получить фотографию. Попробуйте еще раз.")
+		}
+
+		fileID := photo.FileID
+
+		switch state.Step {
+		case "waiting_selfie":
+			state.SelfieID = fileID
+			state.Step = "waiting_passport"
+			setVerificationState(userID, state)
+			return c.Send("✅ Селфи получено!\n\n📄 Теперь отправьте фотографию паспорта (страница с фото и данными).")
+
+		case "waiting_passport":
+			state.PassportID = fileID
+			state.Step = "completed"
+			setVerificationState(userID, state)
+
+			// Отправляем фотографии в админский чат
+			return sendVerificationToAdmin(b, c, state, cfg.TelegramAdminChatID)
+
+		default:
+			return c.Send("❌ Неожиданное состояние. Используйте /verificate для начала заново.")
+		}
+	})
+
+	// Обработка callback кнопок верификации
+	b.Handle(tele.OnCallback, func(c tele.Context) error {
+		data := c.Callback().Data
+
+		if strings.HasPrefix(data, "verify_user_") {
+			return handleVerificationCallback(b, c, data, client, cfg)
+		}
+
 		return nil
 	})
 
@@ -134,4 +241,97 @@ func main() {
 
 	logg.Info("Starting Telegram bot (Telebot)...")
 	b.Start()
+}
+
+// sendVerificationToAdmin отправляет фотографии верификации в админский чат
+func sendVerificationToAdmin(bot *tele.Bot, c tele.Context, state *VerificationState, adminChatID int64) error {
+	adminChat := &tele.Chat{ID: adminChatID}
+
+	// Создаем inline кнопки
+	markup := bot.NewMarkup()
+	approveBtn := markup.Data("✅ Подтвердить", fmt.Sprintf("verify_user_%d_true", state.UserID))
+	rejectBtn := markup.Data("❌ Отозвать", fmt.Sprintf("verify_user_%d_false", state.UserID))
+	markup.Inline(markup.Row(approveBtn, rejectBtn))
+
+	// Отправляем селфи
+	selfieMsg := &tele.Photo{
+		File:    tele.File{FileID: state.SelfieID},
+		Caption: fmt.Sprintf("🔐 Заявка на верификацию\n👤 Пользователь: %d\n📸 Селфи", state.UserID),
+	}
+	_, err := bot.Send(adminChat, selfieMsg, markup)
+	if err != nil {
+		return c.Send("❌ Ошибка при отправке заявки. Попробуйте позже.")
+	}
+
+	// Отправляем паспорт
+	passportMsg := &tele.Photo{
+		File:    tele.File{FileID: state.PassportID},
+		Caption: "📄 Фотография паспорта",
+	}
+	_, err = bot.Send(adminChat, passportMsg)
+	if err != nil {
+		return c.Send("❌ Ошибка при отправке заявки. Попробуйте позже.")
+	}
+
+	// Очищаем состояние
+	clearVerificationState(state.UserID)
+
+	return c.Send("✅ Ваша заявка на верификацию отправлена администратору!\n\n⏳ Ожидайте решения. Мы уведомим вас о результате.")
+}
+
+// handleVerificationCallback обрабатывает нажатие кнопок верификации
+func handleVerificationCallback(bot *tele.Bot, c tele.Context, data string, client *http.Client, cfg *config.Config) error {
+	logg := logger.New()
+
+	// Парсим данные: verify_user_<user_id>_<true/false>
+	parts := strings.Split(data, "_")
+	if len(parts) != 4 {
+		return c.Respond(&tele.CallbackResponse{Text: "❌ Ошибка обработки запроса"})
+	}
+
+	userIDStr := parts[2]
+	verificationStatus := parts[3]
+
+	userID, err := strconv.ParseInt(userIDStr, 10, 64)
+	if err != nil {
+		return c.Respond(&tele.CallbackResponse{Text: "❌ Ошибка обработки запроса"})
+	}
+
+	isVerified := verificationStatus == "true"
+
+	// Отправляем запрос к API
+	payload := map[string]interface{}{
+		"userId":        userID,
+		"isVerificated": isVerified,
+	}
+
+	body, _ := json.Marshal(payload)
+	apiURL := strings.TrimRight(cfg.APIBaseURL, "/") + "/v1/check-verified-passport"
+	req, _ := http.NewRequest("POST", apiURL, strings.NewReader(string(body)))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		logg.Error("API request failed:", err)
+		return c.Respond(&tele.CallbackResponse{Text: "❌ Ошибка при обновлении статуса верификации"})
+	}
+	defer resp.Body.Close()
+
+	// Удаляем фотографии из чата
+	message := c.Message()
+	if message != nil {
+		bot.Delete(message)
+	}
+
+	// Отправляем уведомление пользователю
+	userChat := &tele.Chat{ID: userID}
+	statusText := "✅ Верификация подтверждена!"
+	if !isVerified {
+		statusText = "❌ Верификация отклонена"
+	}
+
+	bot.Send(userChat, statusText)
+
+	// Отвечаем на callback
+	return c.Respond(&tele.CallbackResponse{Text: "✅ Статус верификации обновлен"})
 }
