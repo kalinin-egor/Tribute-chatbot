@@ -38,7 +38,7 @@ WORKDIR /app
 COPY --from=builder /app/tribute-chatbot .
 
 # Копируем конфигурационный файл (опционально)
-COPY --from=builder /app/config.env ./config.env.example
+COPY --from=builder /app/.env ./.env.example
 
 # Меняем владельца файлов
 RUN chown -R appuser:appgroup /app
