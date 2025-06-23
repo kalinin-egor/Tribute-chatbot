@@ -183,12 +183,6 @@ func main() {
 		return nil
 	})
 
-	// Специальный обработчик для кнопок верификации
-	b.Handle(&tele.Btn{Data: "verify_user_*"}, func(c tele.Context) error {
-		data := c.Callback().Data
-		return handleVerificationCallback(b, c, data, client, cfg)
-	})
-
 	// Обычные сообщения (AI-ответы)
 	b.Handle(tele.OnText, func(c tele.Context) error {
 		text := strings.ToLower(strings.TrimSpace(c.Text()))
