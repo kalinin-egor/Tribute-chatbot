@@ -247,7 +247,18 @@ func main() {
 
 // sendVerificationToAdmin отправляет фотографии верификации в админский чат
 func sendVerificationToAdmin(bot *tele.Bot, c tele.Context, state *VerificationState, adminChatID int64) error {
+	logg := logger.New()
 	adminChat := &tele.Chat{ID: adminChatID}
+
+	logg.Info(fmt.Sprintf("Sending verification to admin chat: %d", adminChatID))
+
+	// Проверяем, что бот может отправлять сообщения в админский чат
+	testMsg := "🔧 Тест отправки сообщений"
+	_, err := bot.Send(adminChat, testMsg)
+	if err != nil {
+		logg.Error("Bot cannot send messages to admin chat:", err)
+		return c.Send("❌ Ошибка: бот не может отправлять сообщения в админский чат. Проверьте права бота.")
+	}
 
 	// Создаем inline кнопки
 	markup := bot.NewMarkup()
@@ -255,23 +266,31 @@ func sendVerificationToAdmin(bot *tele.Bot, c tele.Context, state *VerificationS
 	rejectBtn := markup.Data("❌ Отозвать", fmt.Sprintf("verify_user_%d_false", state.UserID))
 	markup.Inline(markup.Row(approveBtn, rejectBtn))
 
-	// Создаем медиа группу с двумя фотографиями
-	media := &tele.Album{
-		&tele.Photo{
-			File:    tele.File{FileID: state.SelfieID},
-			Caption: fmt.Sprintf("🔐 Заявка на верификацию\n👤 Пользователь: %d\n📸 Селфи", state.UserID),
-		},
-		&tele.Photo{
-			File:    tele.File{FileID: state.PassportID},
-			Caption: "📄 Фотография паспорта",
-		},
+	// Отправляем селфи с кнопками
+	selfieMsg := &tele.Photo{
+		File:    tele.File{FileID: state.SelfieID},
+		Caption: fmt.Sprintf("🔐 Заявка на верификацию\n👤 Пользователь: %d\n📸 Селфи", state.UserID),
 	}
-
-	// Отправляем медиа группу с кнопками
-	_, err := bot.Send(adminChat, media, markup)
+	_, err = bot.Send(adminChat, selfieMsg, markup)
 	if err != nil {
+		logg.Error("Failed to send selfie with buttons:", err)
 		return c.Send("❌ Ошибка при отправке заявки. Попробуйте позже.")
 	}
+
+	logg.Info("Successfully sent selfie with buttons")
+
+	// Отправляем паспорт
+	passportMsg := &tele.Photo{
+		File:    tele.File{FileID: state.PassportID},
+		Caption: "📄 Фотография паспорта",
+	}
+	_, err = bot.Send(adminChat, passportMsg)
+	if err != nil {
+		logg.Error("Failed to send passport:", err)
+		return c.Send("❌ Ошибка при отправке заявки. Попробуйте позже.")
+	}
+
+	logg.Info("Successfully sent passport")
 
 	// Очищаем состояние
 	clearVerificationState(state.UserID)
@@ -334,12 +353,26 @@ func handleVerificationCallback(bot *tele.Bot, c tele.Context, data string, clie
 	// Удаляем сообщения с фотографиями из админского чата
 	callback := c.Callback()
 	if callback != nil && callback.Message != nil {
-		// Удаляем сообщение с фотографиями и кнопками
+		// Удаляем текущее сообщение (с кнопками)
 		err = bot.Delete(callback.Message)
 		if err != nil {
-			logg.Error("Failed to delete verification message:", err)
+			logg.Error("Failed to delete message with buttons:", err)
 		} else {
-			logg.Info("Successfully deleted verification message")
+			logg.Info("Successfully deleted message with buttons")
+		}
+
+		// Удаляем предыдущее сообщение (с паспортом)
+		if callback.Message.ID > 1 {
+			prevMsg := &tele.Message{
+				ID:   callback.Message.ID - 1,
+				Chat: callback.Message.Chat,
+			}
+			err = bot.Delete(prevMsg)
+			if err != nil {
+				logg.Error("Failed to delete passport message:", err)
+			} else {
+				logg.Info("Successfully deleted passport message")
+			}
 		}
 	}
 
