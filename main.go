@@ -172,12 +172,20 @@ func main() {
 
 	// Обработка callback кнопок верификации
 	b.Handle(tele.OnCallback, func(c tele.Context) error {
-		data := c.Callback().Data
-		logg.Info("Received callback data:", data)
+		callback := c.Callback()
+		if callback == nil {
+			logg.Error("Callback is nil")
+			return nil
+		}
+
+		data := callback.Data
+		logg.Info(fmt.Sprintf("Received callback data: '%s' from user: %d", data, callback.Sender.ID))
 
 		if strings.HasPrefix(data, "verify_user_") {
 			logg.Info("Processing verification callback")
 			return handleVerificationCallback(b, c, data, client, cfg)
+		} else {
+			logg.Info("Callback data does not match verify_user_ pattern")
 		}
 
 		return nil
@@ -262,8 +270,13 @@ func sendVerificationToAdmin(bot *tele.Bot, c tele.Context, state *VerificationS
 
 	// Создаем inline кнопки
 	markup := bot.NewMarkup()
-	approveBtn := markup.Data("✅ Подтвердить", fmt.Sprintf("verify_user_%d_true", state.UserID))
-	rejectBtn := markup.Data("❌ Отозвать", fmt.Sprintf("verify_user_%d_false", state.UserID))
+	approveData := fmt.Sprintf("verify_user_%d_true", state.UserID)
+	rejectData := fmt.Sprintf("verify_user_%d_false", state.UserID)
+
+	logg.Info(fmt.Sprintf("Creating buttons with data: approve='%s', reject='%s'", approveData, rejectData))
+
+	approveBtn := markup.Data("✅ Подтвердить", approveData)
+	rejectBtn := markup.Data("❌ Отозвать", rejectData)
 	markup.Inline(markup.Row(approveBtn, rejectBtn))
 
 	// Отправляем селфи с кнопками
