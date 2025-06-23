@@ -39,11 +39,6 @@ Thumbs.db
 # Logs
 *.log
 
-# Environment files
-.env
-.env.local
-.env.*.local
-
 # Documentation
 README.md
 *.md
