@@ -65,6 +65,8 @@ func (s *APIService) UpdateUserVerification(userID int64, isVerified bool) error
 
 // AddBotToChannel добавляет бота в канал
 func (s *APIService) AddBotToChannel(userID int64, channelTitle, channelUsername string) error {
+	s.logger.Info(fmt.Sprintf("AddBotToChannel called with: userID=%d, channelTitle='%s', channelUsername='%s'", userID, channelTitle, channelUsername))
+
 	payload := map[string]interface{}{
 		"user_id":          userID,
 		"channel_title":    channelTitle,
@@ -77,6 +79,9 @@ func (s *APIService) AddBotToChannel(userID int64, channelTitle, channelUsername
 	}
 
 	apiURL := strings.TrimRight(s.config.APIBaseURL, "/") + "/v1/add-bot"
+	s.logger.Info("AddBotToChannel API URL:", apiURL)
+	s.logger.Info("AddBotToChannel payload:", string(body))
+
 	req, err := http.NewRequest("POST", apiURL, strings.NewReader(string(body)))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
@@ -89,6 +94,8 @@ func (s *APIService) AddBotToChannel(userID int64, channelTitle, channelUsername
 		return fmt.Errorf("API request failed: %w", err)
 	}
 	defer resp.Body.Close()
+
+	s.logger.Info("AddBotToChannel response status:", resp.StatusCode)
 
 	if resp.StatusCode == 400 {
 		return fmt.Errorf("channel is already added")

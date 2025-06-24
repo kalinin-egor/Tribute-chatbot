@@ -37,10 +37,14 @@ func (h *Handler) HandleMyChatMember(c tele.Context) error {
 
 	// Если бот стал админом
 	if oldStatus != "administrator" && newStatus == "administrator" {
+		h.logger.Info("Condition met: oldStatus != 'administrator' && newStatus == 'administrator'")
 		userID := upd.NewChatMember.User.ID
 		channelTitle := upd.Chat.Title
 		channelUsername := upd.Chat.Username
 
+		h.logger.Info(fmt.Sprintf("userID: %d, channelTitle: '%s', channelUsername: '%s'", userID, channelTitle, channelUsername))
+
+		h.logger.Info("Calling AddBotToChannel endpoint...")
 		err := h.apiService.AddBotToChannel(userID, channelTitle, channelUsername)
 		if err != nil {
 			if strings.Contains(err.Error(), "channel is already added") {
