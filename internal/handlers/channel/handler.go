@@ -37,7 +37,7 @@ func (h *Handler) HandleMyChatMember(c tele.Context) error {
 
 	// Если бот стал админом
 	if oldStatus != "administrator" && newStatus == "administrator" {
-		userID := upd.NewChatMember.User.ID
+		userID := upd.From.ID
 		channelTitle := upd.Chat.Title
 		channelUsername := upd.Chat.Username
 
