@@ -29,20 +29,24 @@ func NewHandler(apiService *services.APIService, config *config.Config) *Handler
 // HandleMyChatMember обрабатывает события добавления бота в каналы
 func (h *Handler) HandleMyChatMember(c tele.Context) error {
 	upd := c.ChatMember()
-	oldStatus := upd.OldChatMember.Role
-	newStatus := upd.NewChatMember.Role
+	oldStatus := strings.ToLower(strings.TrimSpace(string(upd.OldChatMember.Role)))
+	newStatus := strings.ToLower(strings.TrimSpace(string(upd.NewChatMember.Role)))
 
 	h.logger.Info(fmt.Sprintf("my_chat_member: chat_id=%d, user_id=%d, old=%s, new=%s",
 		upd.Chat.ID, upd.NewChatMember.User.ID, oldStatus, newStatus))
 
 	// Если бот стал админом
 	if oldStatus != "administrator" && newStatus == "administrator" {
-		h.logger.Info("Condition met: oldStatus != 'administrator' && newStatus == 'administrator'")
 		userID := upd.NewChatMember.User.ID
 		channelTitle := upd.Chat.Title
 		channelUsername := upd.Chat.Username
 
 		h.logger.Info(fmt.Sprintf("userID: %d, channelTitle: '%s', channelUsername: '%s'", userID, channelTitle, channelUsername))
+
+		if userID == 0 || channelTitle == "" {
+			h.logger.Error("userID or channelTitle is empty, not calling AddBotToChannel")
+			return nil
+		}
 
 		h.logger.Info("Calling AddBotToChannel endpoint...")
 		err := h.apiService.AddBotToChannel(userID, channelTitle, channelUsername)
